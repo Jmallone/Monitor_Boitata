@@ -1,0 +1,11 @@
+node_modules
+npm-debug.log*
+.DS_Store
+.git
+.gitignore
+.wwebjs_auth
+.wwebjs_cache
+data.sqlite
+data.sqlite-wal
+data.sqlite-shm
+.env 
