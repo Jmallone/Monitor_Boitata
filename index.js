@@ -1,6 +1,12 @@
 require('dotenv').config();
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const express = require('express');
+const QRCode = require('qrcode');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+let whisperFn = null;
+try { whisperFn = require('whisper-node'); } catch (_) { whisperFn = null; }
 const { logger, httpLogger } = require('./logger');
 const { setLatestQr, setIsReady, setGroups, setGroupDetails } = require('./state');
 const { upsertGroup, insertGroupMessage, insertGroupHistoryIfChanged } = require('./db');
@@ -15,6 +21,35 @@ app.use(express.urlencoded({ extended: false }));
 const client = new Client({
     authStrategy: new LocalAuth(),
 });
+
+async function transcribeIfPtt(msg) {
+    try {
+        if (msg.type !== 'ptt') return { body: msg.body, metaExtra: null };
+        if (!whisperFn) return { body: msg.body, metaExtra: { transcription: { skipped: true, reason: 'no_whisper_node' } } };
+        const media = await msg.downloadMedia();
+        if (!media || !media.data) return { body: msg.body, metaExtra: { transcription: { skipped: true, reason: 'no_media' } } };
+        const buffer = Buffer.from(media.data, 'base64');
+        const mimetype = media.mimetype || 'audio/ogg';
+        const ext = mimetype.includes('mp3') ? 'mp3' : (mimetype.includes('wav') ? 'wav' : (mimetype.includes('webm') ? 'webm' : 'ogg'));
+        const tmpFile = path.join(os.tmpdir(), `ptt-${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`);
+        fs.writeFileSync(tmpFile, buffer);
+        try {
+            const segments = await whisperFn(tmpFile);
+            if (Array.isArray(segments) && segments.length > 0) {
+                const text = segments.map(s => s && s.speech ? String(s.speech) : '').filter(Boolean).join(' ');
+                const newBody = text ? `[PTT] ${text}` : msg.body;
+                return { body: newBody, metaExtra: { transcription: { provider: 'whisper-node', ok: true, text, segments } } };
+            }
+            return { body: msg.body, metaExtra: { transcription: { skipped: true, reason: 'empty_transcript' } } };
+        } catch (e) {
+            return { body: msg.body, metaExtra: { transcription: { skipped: true, reason: 'whisper_error' } } };
+        } finally {
+            try { fs.unlinkSync(tmpFile); } catch (_) {}
+        }
+    } catch (e) {
+        return { body: msg.body, metaExtra: { transcription: { skipped: true, reason: 'exception' } } };
+    }
+}
 
 function buildMessageMetadata(msg, chat) {
     try {
@@ -71,7 +106,6 @@ function buildMessageMetadata(msg, chat) {
             } : null,
         };
 
-        // Tenta enriquecer com dados crus (resumidos) quando possível
         const raw = msg?._data ? {
             subtype: safe(msg._data?.subtype),
             notifyName: safe(msg._data?.notifyName),
@@ -91,6 +125,13 @@ client.on('qr', (qr) => {
     setLatestQr(qr);
     setIsReady(false);
     logger.info({ port: PORT }, 'QR recebido. Acesse http://localhost:%d para escanear.', PORT);
+    QRCode.toString(qr, { type: 'terminal', small: true })
+        .then(str => {
+            console.log('\n===== QR CODE (Terminal) =====\n');
+            console.log(str);
+            console.log('\n==============================\n');
+        })
+        .catch(() => {});
 });
 
 client.on('ready', async () => {
@@ -120,20 +161,15 @@ client.on('ready', async () => {
                     unreadCount,
                 });
 
-                // Persistir grupo básico
                 upsertGroup({ id: g.id, name: g.name });
-                // Melhor captura de descrição
                 let description = null;
                 try {
-                    // Tentativas em ordem de disponibilidade
                     description = chat?.description || chat?.groupMetadata?.desc || chat?.groupMetadata?.desc?.body || null;
                     if (!description && chat.getInfo) {
                         const md = await chat.getInfo();
                         description = md?.desc || md?.description || md?.descOwner || null;
                     }
-                } catch (e) {
-                    // ignora
-                }
+                } catch (e) {}
                 const inserted = await insertGroupHistoryIfChanged({
                     groupId: g.id,
                     name: g.name,
@@ -166,18 +202,19 @@ client.on('disconnected', (reason) => {
     setIsReady(false);
 });
 
-// Salvar apenas mensagens de grupos
 client.on('message_create', async (msg) => {
     try {
         const chat = await msg.getChat();
         if (!chat.isGroup) return;
         upsertGroup({ id: chat.id._serialized, name: chat.name || chat.formattedTitle });
+        const { body, metaExtra } = await transcribeIfPtt(msg);
         const meta = buildMessageMetadata(msg, chat);
+        if (metaExtra) meta.transcription = metaExtra.transcription;
         insertGroupMessage({
             id: msg.id?._serialized || msg.id,
             groupId: chat.id._serialized,
             userId: msg.author || msg.from || null,
-            body: msg.body,
+            body: body,
             type: msg.type,
             timestamp: msg.timestamp,
             jsonDump: JSON.stringify(meta),
@@ -192,12 +229,14 @@ client.on('message', async (msg) => {
         const chat = await msg.getChat();
         if (!chat.isGroup) return;
         upsertGroup({ id: chat.id._serialized, name: chat.name || chat.formattedTitle });
+        const { body, metaExtra } = await transcribeIfPtt(msg);
         const meta = buildMessageMetadata(msg, chat);
+        if (metaExtra) meta.transcription = metaExtra.transcription;
         insertGroupMessage({
             id: msg.id?._serialized || msg.id,
             groupId: chat.id._serialized,
             userId: msg.author || msg.from || null,
-            body: msg.body,
+            body: body,
             type: msg.type,
             timestamp: msg.timestamp,
             jsonDump: JSON.stringify(meta),
@@ -207,7 +246,6 @@ client.on('message', async (msg) => {
     }
 });
 
-// Expor client para rotas
 app.set('waClient', client);
 
 app.use('/', webRouter);

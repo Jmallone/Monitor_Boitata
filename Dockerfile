@@ -7,6 +7,7 @@ WORKDIR /app
 # Instala dependências do sistema necessárias para o Chromium (whatsapp-web.js)
 RUN apt-get update && apt-get install -y \
   chromium \
+  ffmpeg \
   fonts-liberation \
   libatk-bridge2.0-0 \
   libatk1.0-0 \

@@ -79,6 +79,18 @@ Acesse `http://localhost:3000` para escanear o QR. O healthcheck está disponív
 - Em ambientes containerizados, o `whatsapp-web.js` usa Chromium headless com flags `--no-sandbox` por padrão (configuradas pela env `WWEBJS_PUPPETEER_ARGS`).
 - Na primeira inicialização será necessário escanear o QR Code. Com os volumes configurados, a sessão será reutilizada nas próximas execuções.
 
+## Transcrição de áudios (PTT)
+Se a mensagem recebida for do tipo `ptt` (áudio/voz), o sistema pode transcrever automaticamente usando o Whisper da OpenAI.
+
+- Ative definindo as variáveis de ambiente:
+  - `OPENAI_API_KEY`: chave da OpenAI (obrigatória para transcrever)
+  - `TRANSCRIBE_LANGUAGE` (opcional): ex. `pt`
+  - `TRANSCRIBE_PROMPT` (opcional): texto de contexto para melhorar a qualidade
+- Funcionamento:
+  - O áudio é baixado, enviado à API de transcrição e o texto retornado é salvo no `body` da mensagem com o prefixo `[PTT]` e também em `jsonDump.transcription`.
+  - Se a transcrição não estiver habilitada ou falhar, a mensagem é salva normalmente.
+- Custos: a transcrição usa a API da OpenAI; verifique preços na sua conta antes de habilitar.
+
 ## Rotas principais
 - `GET /` → status, QR Code (quando não conectado) e lista de grupos (quando conectado)
 - `GET /qr.png` → imagem do QR Code
