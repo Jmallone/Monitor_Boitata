@@ -24,13 +24,14 @@ RUN apt-get update && apt-get install -y \
   libnss3 \
   libxshmfence1 \
   ca-certificates \
+  build-essential \
   && rm -rf /var/lib/apt/lists/*
 
 # Copia apenas manifestos para cache otimizado
-COPY package.json ./
+COPY package*.json ./
 
 # Instala apenas dependências de produção
-RUN npm ci --omit=dev
+RUN if [ -f package-lock.json ]; then npm ci --omit=dev; else npm install --omit=dev; fi
 
 # ---- Build de runtime ----
 FROM node:20-bullseye AS runner
