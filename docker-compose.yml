@@ -4,5 +4,28 @@ services:
   boitata-monitor:
     build: .
     ports:
-      - "3000:3000" 
+      - "3000:3000"
     restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - DB_CLIENT=sqlite
+      - DB_PATH=/data/data.sqlite
+      - PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+      - PUPPETEER_ARGS=--no-sandbox,--disable-setuid-sandbox,--disable-dev-shm-usage,--disable-gpu,--no-zygote,--single-process
+      - WHISPER_ENABLE=0
+    volumes:
+      - monitor_data:/data
+      - monitor_auth:/app/.wwebjs_auth
+      - monitor_cache:/app/.wwebjs_cache
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:'+(process.env.PORT||3000)+'/status', r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 60s
+      retries: 3
+
+volumes:
+  monitor_data:
+  monitor_auth:
+  monitor_cache:
