@@ -6,7 +6,9 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 let whisperFn = null;
-try { whisperFn = require('whisper-node'); } catch (_) { whisperFn = null; }
+if (process.env.WHISPER_ENABLE === '1') {
+    try { whisperFn = require('whisper-node'); } catch (_) { whisperFn = null; }
+}
 const { logger, httpLogger } = require('./logger');
 const { setLatestQr, setIsReady, setGroups, setGroupDetails } = require('./state');
 const { upsertGroup, insertGroupMessage, insertGroupHistoryIfChanged } = require('./db');
@@ -18,8 +20,23 @@ const PORT = process.env.PORT || 3000;
 app.use(httpLogger);
 app.use(express.urlencoded({ extended: false }));
 
+const chromiumPath = process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium';
+const puppeteerArgs = [
+    '--no-sandbox',
+    '--disable-setuid-sandbox',
+    '--disable-dev-shm-usage',
+    '--disable-gpu',
+    '--no-zygote',
+    '--single-process'
+];
+
 const client = new Client({
     authStrategy: new LocalAuth(),
+    puppeteer: {
+        executablePath: chromiumPath,
+        args: puppeteerArgs,
+        headless: true
+    }
 });
 
 async function transcribeIfPtt(msg) {

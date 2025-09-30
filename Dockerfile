@@ -49,7 +49,8 @@ ENV NODE_ENV=production \
     PORT=3000 \
     DB_CLIENT=sqlite \
     DB_PATH=/data/data.sqlite \
-    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium \
+    PUPPETEER_ARGS=--no-sandbox,--disable-setuid-sandbox,--disable-dev-shm-usage,--disable-gpu,--no-zygote,--single-process
 
 # Diretórios de dados (persistência)
 RUN mkdir -p /data /app/.wwebjs_auth /app/.wwebjs_cache \
@@ -60,6 +61,12 @@ COPY --from=deps /app/node_modules ./node_modules
 
 # Copia código da aplicação
 COPY . .
+
+# Ajusta permissões do diretório de logs (caso exista no código-fonte)
+RUN mkdir -p /app/logs && chown -R node:node /app/logs
+
+# Evita falha do wrapper do Chromium ao tentar incluir arquivos em /etc/chromium.d
+RUN mkdir -p /etc/chromium.d && touch /etc/chromium.d/empty.sh
 
 # Cria usuário não-root
 USER node
